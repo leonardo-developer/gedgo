@@ -40,6 +40,15 @@ class GedcomParser(object):
                 self.trailer = entry
 
     def __parse_element(self, line):
+
+        if line[2] == '_':
+            return None, {
+                "tag": 'Unknown',
+                "pointer": None,
+                "value": '',
+                "children": []
+            }
+
         parsed = self.line_re.findall(line.strip())
 
         if not parsed:
