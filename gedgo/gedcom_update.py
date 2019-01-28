@@ -1,15 +1,16 @@
-from gedcom_parser import GedcomParser
-from models import Gedcom, Person, Family, Note, Document, Event
+from datetime import datetime
+from os import path
+from re import findall
 
+import requests
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.utils.datetime_safe import date
 from django.utils import timezone
-from datetime import datetime
-from re import findall
-from os import path
-
+from django.utils.datetime_safe import date
+from gedcom_parser import GedcomParser
 from gedgo.storages import gedcom_storage, resize_thumb
+from models import Document, Event, Family, Gedcom, Note, Person
 
 
 @transaction.atomic
@@ -260,17 +261,26 @@ def __process_Document(entry, obj, g):
     name = path.basename(full_name).decode('utf-8').strip()
     known = Document.objects.filter(docfile=name).exists()
 
+    if not known:
+        response = requests.get(full_name)
+        if response.status_code < 300:
+            file = ContentFile(response.content)
+            dj_file = gedcom_storage.save(name, file)
+            m = Document.objects.create(title=name, docfile=dj_file, kind='PHOTO', gedcom=g)
+            m.docfile.name = name
+            known = True
+
     if not known and not gedcom_storage.exists(name):
         return None
 
-    kind = __child_value_by_tags(entry, 'TYPE')
+    # kind = __child_value_by_tags(entry, 'TYPE')
     if known:
-        m = Document.objects.filter(docfile=name).first()
+        m = Document.objects.filter(title=name).first()
     else:
         m = Document(gedcom=g, kind=kind)
         m.docfile.name = name
 
-    if kind == 'PHOTO':
+    if m.kind == 'PHOTO':
         try:
             make_thumbnail(name, 'w128h128')
             make_thumbnail(name, 'w640h480')
@@ -280,6 +290,8 @@ def __process_Document(entry, obj, g):
             return None  # Bail on document creation if thumb fails
 
     m.save()
+
+    obj.profile.add(m)
 
     if isinstance(obj, Person) and \
             not m.tagged_people.filter(pointer=obj.pointer).exists():
